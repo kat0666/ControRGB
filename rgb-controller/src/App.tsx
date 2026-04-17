@@ -1,5 +1,6 @@
 import { startTransition, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { hexToRgb } from "./utils/color";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -117,13 +118,6 @@ function buildEvent(message: string, tone: EventTone = "neutral"): EventEntry {
   };
 }
 
-function hexToRgb(hex: string): [number, number, number] {
-  return [
-    Number.parseInt(hex.slice(1, 3), 16),
-    Number.parseInt(hex.slice(3, 5), 16),
-    Number.parseInt(hex.slice(5, 7), 16),
-  ];
-}
 
 function Panel({ title, eyebrow, accent, icon: Icon, className = "", children }: PanelProps) {
   return (
