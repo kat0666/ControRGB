@@ -407,6 +407,7 @@ export default function App() {
               key={item.id}
               type="button"
               className={`nav-button ${activeTab === item.id ? "is-active" : ""}`}
+              aria-current={activeTab === item.id ? "true" : undefined}
               onClick={() => setActiveTab(item.id)}
             >
               <span className="nav-button__icon" aria-hidden="true">
@@ -424,6 +425,7 @@ export default function App() {
           <button
             type="button"
             className={`power-button ${systemPower ? "is-on" : ""}`}
+            aria-pressed={systemPower}
             onClick={() => {
               setSystemPower((current) => !current);
               pushEvent(
@@ -449,7 +451,7 @@ export default function App() {
           <div className="hero-copy">
             <p className="hero-copy__eyebrow">RGB command spine / Tauri + USB + BLE</p>
             <h2 className="hero-copy__title">A proper control deck instead of a lonely color input.</h2>
-            <p className="hero-copy__body">{statusLine}</p>
+            <p className="hero-copy__body" aria-live="polite" role="status">{statusLine}</p>
           </div>
 
           <div className="hero-status">
