@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
@@ -364,16 +364,12 @@ export default function App() {
   };
 
   const handleProfileSelect = (profile: Profile) => {
-    startTransition(() => {
-      setActiveProfile(profile.name);
-    });
+    setActiveProfile(profile.name);
     void broadcastColor(profile.hex, `Profile ${profile.name}`);
   };
 
   const handleColorInputChange = (hex: string) => {
-    startTransition(() => {
-      setActiveProfile("Custom Mix");
-    });
+    setActiveProfile("Custom Mix");
     void broadcastColor(hex, "Manual color");
   };
 
