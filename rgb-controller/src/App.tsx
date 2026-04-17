@@ -109,7 +109,7 @@ const DELIVERY_TRACK: Array<{ label: string; detail: string }> = [
   },
 ];
 
-function buildEvent(message: string, tone: EventTone = "neutral"): EventEntry {
+export function buildEvent(message: string, tone: EventTone = "neutral"): EventEntry {
   return {
     id: Date.now() + Math.floor(Math.random() * 1000),
     message,
