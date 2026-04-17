@@ -262,23 +262,27 @@ export default function App() {
     }
 
     const results = await Promise.allSettled(targets.map((target) => target.action()));
-    const delivered = results.filter((result) => result.status === "fulfilled").length;
+
+    let delivered = 0;
+    const successLabels: string[] = [];
+    const failureMessages: string[] = [];
+
+    results.forEach((result, index) => {
+      const label = targets[index]?.label ?? "Unknown target";
+      if (result.status === "fulfilled") {
+        delivered++;
+        successLabels.push(label);
+      } else {
+        failureMessages.push(`${label}: ${String(result.reason)}`);
+      }
+    });
 
     if (delivered > 0) {
-      const successTargets = targets
-        .filter((_, index) => results[index]?.status === "fulfilled")
-        .map((target) => target.label)
-        .join(", ");
+      const successTargets = successLabels.join(", ");
       const message = `${source} pushed ${hex} to ${successTargets}.`;
       setStatusLine(message);
       pushEvent(message, "success");
     }
-
-    const failureMessages = results
-      .map((result, index) =>
-        result.status === "rejected" ? `${targets[index]?.label ?? "Unknown target"}: ${String(result.reason)}` : null,
-      )
-      .filter((value): value is string => Boolean(value));
 
     if (failureMessages.length > 0) {
       const message = `Some targets rejected the color push. ${failureMessages.join(" | ")}`;
