@@ -1,0 +1,439 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Monitor, 
+  Music, 
+  Layers, 
+  Settings, 
+  Power, 
+  Activity,
+  Play,
+  SkipForward,
+  SkipBack,
+  Cpu,
+  TerminalSquare
+} from 'lucide-react';
+
+// --- Global Custom CSS for Cyberpunk Effects ---
+const CyberStyles = () => (
+  <style dangerouslySetInnerHTML={{__html: `
+    @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
+
+    :root {
+      --neon-cyan: #00F0FF;
+      --neon-pink: #FF003C;
+      --neon-purple: #C355FF;
+      --glass-bg: rgba(10, 14, 23, 0.65);
+    }
+
+    body {
+      font-family: 'Rajdhani', sans-serif;
+      background-color: #050814;
+      overflow: hidden;
+    }
+
+    .font-mono { font-family: 'Share Tech Mono', monospace; }
+
+    /* CRT Scanlines */
+    .scanlines {
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2));
+      background-size: 100% 4px;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.4;
+    }
+
+    /* Glitch Effect */
+    .glitch-hover:hover {
+      animation: glitch-skew 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) both infinite;
+      color: var(--neon-cyan);
+      text-shadow: 2px 0 var(--neon-pink), -2px 0 var(--neon-purple);
+    }
+
+    @keyframes glitch-skew {
+      0% { transform: skew(0deg); }
+      20% { transform: skew(-10deg); }
+      40% { transform: skew(10deg); }
+      60% { transform: skew(-5deg); }
+      80% { transform: skew(5deg); }
+      100% { transform: skew(0deg); }
+    }
+
+    /* Animated Border Button (Codepen Inspired) */
+    .cyber-btn {
+      position: relative;
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      color: var(--neon-cyan);
+      overflow: hidden;
+      transition: all 0.3s ease;
+      box-shadow: inset 0 0 10px rgba(0, 240, 255, 0.1);
+    }
+
+    .cyber-btn::before {
+      content: '';
+      position: absolute;
+      top: 0; left: -100%;
+      width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.4), transparent);
+      transition: all 0.4s ease;
+    }
+
+    .cyber-btn:hover {
+      background: rgba(0, 240, 255, 0.15);
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.4), inset 0 0 15px rgba(0, 240, 255, 0.2);
+      border-color: var(--neon-cyan);
+      text-shadow: 0 0 8px var(--neon-cyan);
+    }
+
+    .cyber-btn:hover::before {
+      left: 100%;
+      transition: all 0.4s ease;
+    }
+
+    .cyber-btn.active {
+      background: rgba(0, 240, 255, 0.2);
+      border-right: 4px solid var(--neon-cyan);
+      box-shadow: inset 20px 0 30px -15px rgba(0, 240, 255, 0.3);
+    }
+
+    /* Glass Panel */
+    .glass-panel {
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(0, 240, 255, 0.15);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+    }
+
+    /* Audio Visualizer Bars */
+    .eq-bar {
+      width: 4px;
+      background: var(--neon-cyan);
+      border-radius: 2px;
+      animation: eq-bounce 1s infinite ease-in-out alternate;
+    }
+    .eq-bar:nth-child(2) { animation-delay: 0.2s; background: var(--neon-purple); }
+    .eq-bar:nth-child(3) { animation-delay: 0.4s; background: var(--neon-pink); }
+    .eq-bar:nth-child(4) { animation-delay: 0.1s; }
+    .eq-bar:nth-child(5) { animation-delay: 0.5s; background: var(--neon-purple); }
+
+    @keyframes eq-bounce {
+      0% { height: 10px; opacity: 0.5; }
+      100% { height: 35px; opacity: 1; box-shadow: 0 0 10px currentColor; }
+    }
+
+    /* Power Button Epic */
+    .power-btn {
+      background: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255, 0, 60, 0.1) 10px, rgba(255, 0, 60, 0.1) 20px);
+      border: 1px solid rgba(255, 0, 60, 0.5);
+      color: var(--neon-pink);
+      text-shadow: 0 0 10px var(--neon-pink);
+      box-shadow: 0 0 15px rgba(255, 0, 60, 0.2), inset 0 0 10px rgba(255, 0, 60, 0.2);
+    }
+    .power-btn:hover {
+      background: rgba(255, 0, 60, 0.2);
+      box-shadow: 0 0 30px rgba(255, 0, 60, 0.6), inset 0 0 20px rgba(255, 0, 60, 0.4);
+      color: #fff;
+    }
+    .power-btn.on {
+      border-color: var(--neon-cyan);
+      color: var(--neon-cyan);
+      text-shadow: 0 0 10px var(--neon-cyan);
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.2), inset 0 0 10px rgba(0, 240, 255, 0.2);
+      background: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0, 240, 255, 0.05) 10px, rgba(0, 240, 255, 0.05) 20px);
+    }
+    .power-btn.on:hover {
+      background: rgba(0, 240, 255, 0.2);
+      box-shadow: 0 0 30px rgba(0, 240, 255, 0.6), inset 0 0 20px rgba(0, 240, 255, 0.4);
+      color: #fff;
+    }
+  `}} />
+);
+
+// --- Sci-Fi Components ---
+const GlassCard = ({ children, className = '', title, icon: Icon, glowingBorder }) => (
+  <div className={`glass-panel rounded-xl overflow-hidden relative group ${className}`}>
+    {glowingBorder && (
+      <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${glowingBorder}`} />
+    )}
+    {title && (
+      <div className="border-b border-cyan-900/50 bg-black/40 px-4 py-3 flex items-center gap-2">
+        {Icon && <Icon size={16} className="text-cyan-400" />}
+        <h3 className="font-mono text-sm tracking-widest text-cyan-400 uppercase">{title}</h3>
+      </div>
+    )}
+    <div className="p-5">{children}</div>
+  </div>
+);
+
+const TerminalLine = ({ command, status, delay = 0 }) => (
+  <div className="flex justify-between items-start font-mono text-xs sm:text-sm animate-in fade-in slide-in-from-left-4" style={{ animationDelay: `${delay}ms`, animationFillMode: 'both' }}>
+    <span className="text-slate-400 flex gap-2">
+      <span className="text-cyan-500">{'>'}</span> {command}
+    </span>
+    <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-wider ${status === 'Active' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}>
+      {status}
+    </span>
+  </div>
+);
+
+// --- Main Application ---
+export default function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [systemPower, setSystemPower] = useState(true);
+  const [activeProfile, setActiveProfile] = useState('Cyberpunk Neon');
+
+  // Background atmospheric effect elements
+  const bgElements = (
+    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+      <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-[#00F0FF]/10 blur-[120px] rounded-full animate-pulse"></div>
+      <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-[#C355FF]/10 blur-[120px] rounded-full animate-pulse" style={{animationDelay: '1s'}}></div>
+    </div>
+  );
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500 relative z-10">
+            <header className="flex items-end justify-between mb-8">
+              <div>
+                <h2 className="text-4xl font-bold text-white uppercase tracking-wider glitch-hover flex items-center gap-3">
+                  <Activity className="text-cyan-400" size={32} /> 
+                  System_Status
+                </h2>
+                <p className="font-mono text-cyan-500/70 text-sm tracking-widest mt-1 uppercase">Monitor de telemetría LSI</p>
+              </div>
+              <div className="hidden sm:flex items-center gap-3 font-mono text-xs text-slate-400 border border-cyan-900/50 bg-black/40 px-3 py-1.5 rounded-md shadow-[0_0_10px_rgba(0,240,255,0.1)]">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-400 animate-pulse shadow-[0_0_8px_#4ade80]"></span> FASTAPI: ONLINE</span>
+                <span className="mx-2 text-slate-700">|</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]"></span> RGB_ENGINE: SYNCED</span>
+              </div>
+            </header>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <GlassCard title="Current_Profile" icon={Layers} glowingBorder="from-cyan-500 via-purple-500 to-pink-500">
+                <div className="flex items-center justify-between mt-2">
+                  <div className="space-y-1">
+                    <span className="text-3xl text-white font-bold tracking-tight glitch-hover cursor-default">{activeProfile}</span>
+                    <p className="text-xs font-mono text-cyan-400/60 uppercase">Asus Z790 + RAM Synced</p>
+                  </div>
+                  {/* Glowing Core representation */}
+                  <div className="relative w-16 h-16 flex items-center justify-center">
+                    <div className="absolute inset-0 border-2 border-dashed border-cyan-500/50 rounded-full animate-[spin_4s_linear_infinite]"></div>
+                    <div className="absolute inset-2 border border-purple-500/50 rounded-full animate-[spin_3s_linear_infinite_reverse]"></div>
+                    <div className="w-6 h-6 rounded-full bg-cyan-400 shadow-[0_0_20px_#00F0FF,0_0_40px_#C355FF] animate-pulse"></div>
+                  </div>
+                </div>
+              </GlassCard>
+
+              <GlassCard title="Process_Watcher.exe" icon={TerminalSquare} glowingBorder="from-slate-700 to-slate-800">
+                <div className="space-y-3 bg-black/60 p-4 rounded-lg border border-slate-800/80 shadow-inner">
+                  <TerminalLine command="watching: Cyberpunk2077.exe" status="Active" delay={100} />
+                  <TerminalLine command="watching: eldenring.exe" status="Standby" delay={200} />
+                  <TerminalLine command="watching: bg3.exe" status="Standby" delay={300} />
+                  <div className="pt-2 mt-2 border-t border-slate-800/50 font-mono text-[10px] text-slate-500">
+                    <span className="text-cyan-500 animate-pulse">_</span> Awaiting new processes...
+                  </div>
+                </div>
+              </GlassCard>
+
+              {/* Hardware Stats Mockup */}
+              <GlassCard className="lg:col-span-2" title="Hardware_Telemetry" icon={Cpu}>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {[
+                    { label: 'CPU TEMP', val: '45°C', color: 'text-cyan-400' },
+                    { label: 'GPU TEMP (RTX 3090)', val: '62°C', color: 'text-purple-400' },
+                    { label: 'RAM USAGE', val: '18GB / 64GB', color: 'text-pink-400' },
+                    { label: 'RGB LATENCY', val: '12ms', color: 'text-green-400' }
+                  ].map((stat, i) => (
+                    <div key={i} className="bg-slate-900/50 border border-slate-800/50 rounded-lg p-4 text-center">
+                      <div className="font-mono text-[10px] text-slate-500 mb-1">{stat.label}</div>
+                      <div className={`text-2xl font-bold font-mono ${stat.color} drop-shadow-[0_0_8px_currentColor]`}>{stat.val}</div>
+                    </div>
+                  ))}
+                </div>
+              </GlassCard>
+            </div>
+          </div>
+        );
+      
+      case 'profiles':
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500 relative z-10">
+            <header className="mb-8">
+              <h2 className="text-4xl font-bold text-white uppercase tracking-wider glitch-hover flex items-center gap-3">
+                <Layers className="text-purple-400" size={32} /> 
+                Neural_Profiles
+              </h2>
+              <p className="font-mono text-purple-500/70 text-sm tracking-widest mt-1 uppercase">Librería de matrices de color</p>
+            </header>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {[
+                { name: 'Cyberpunk Neon', colors: 'from-cyan-400 via-purple-500 to-pink-500', glow: 'hover:shadow-[0_0_30px_rgba(195,85,255,0.4)]' },
+                { name: 'Hacker Matrix', colors: 'from-green-400 to-emerald-600', glow: 'hover:shadow-[0_0_30px_rgba(74,222,128,0.4)]' },
+                { name: 'Elden Gold', colors: 'from-yellow-300 via-amber-500 to-yellow-700', glow: 'hover:shadow-[0_0_30px_rgba(250,204,21,0.4)]' },
+                { name: 'Noche Estrellada', colors: 'from-blue-600 via-indigo-800 to-black', glow: 'hover:shadow-[0_0_30px_rgba(79,70,229,0.4)]' },
+                { name: 'Alerta Roja', colors: 'from-red-500 to-rose-900', glow: 'hover:shadow-[0_0_30px_rgba(244,63,94,0.4)]' },
+              ].map((prof) => (
+                <div 
+                  key={prof.name} 
+                  onClick={() => setActiveProfile(prof.name)}
+                  className={`
+                    glass-panel p-5 rounded-xl cursor-pointer transition-all duration-300 transform hover:-translate-y-1
+                    ${activeProfile === prof.name ? 'border-cyan-400 ring-1 ring-cyan-400 shadow-[0_0_20px_rgba(0,240,255,0.3)]' : 'border-white/10 hover:border-white/30'}
+                    ${prof.glow}
+                  `}
+                >
+                  <div className="flex flex-col justify-between h-full gap-4">
+                    <div className="flex justify-between items-start">
+                      <h3 className="font-bold text-lg text-slate-200 tracking-wide">{prof.name}</h3>
+                      {activeProfile === prof.name && (
+                        <span className="font-mono text-[9px] px-2 py-0.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded">ACTIVE</span>
+                      )}
+                    </div>
+                    <div className={`h-2 w-full rounded-full bg-gradient-to-r ${prof.colors} shadow-[0_0_10px_currentColor] opacity-90`}></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'spotify':
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500 relative z-10">
+             <header className="mb-8">
+              <h2 className="text-4xl font-bold text-white uppercase tracking-wider glitch-hover flex items-center gap-3">
+                <Music className="text-green-400" size={32} /> 
+                Audio_Sync
+              </h2>
+              <p className="font-mono text-green-500/70 text-sm tracking-widest mt-1 uppercase">Spotipy Color Extraction Module</p>
+            </header>
+
+            <GlassCard glowingBorder="from-green-500 to-emerald-700">
+              <div className="flex flex-col md:flex-row gap-8 items-center p-4">
+                
+                {/* Album Art with Cyber Frame */}
+                <div className="relative group">
+                  <div className="absolute -inset-1 bg-gradient-to-r from-green-500 to-cyan-500 rounded-lg blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
+                  <div className="relative w-56 h-56 rounded-lg bg-black border border-slate-700 overflow-hidden">
+                    <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&q=80&w=400')] bg-cover bg-center opacity-80 mix-blend-screen group-hover:scale-110 transition-transform duration-700"></div>
+                    
+                    {/* Visualizer Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+                    <div className="absolute bottom-4 left-0 w-full flex justify-center items-end gap-1.5 h-16 px-4">
+                      <div className="eq-bar"></div>
+                      <div className="eq-bar"></div>
+                      <div className="eq-bar"></div>
+                      <div className="eq-bar"></div>
+                      <div className="eq-bar"></div>
+                      <div className="eq-bar"></div>
+                      <div className="eq-bar"></div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex-1 space-y-6 w-full">
+                  <div>
+                    <h3 className="text-3xl font-bold text-white tracking-tight drop-shadow-md">Chippin' In</h3>
+                    <p className="text-cyan-400 font-mono text-sm mt-1 uppercase">SAMURAI, Refused</p>
+                  </div>
+                  
+                  {/* Media Controls */}
+                  <div className="flex items-center gap-4 bg-black/40 w-max p-2 rounded-full border border-slate-800">
+                    <button className="p-3 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"><SkipBack size={20} /></button>
+                    <button className="p-4 rounded-full bg-green-500 hover:bg-green-400 text-black shadow-[0_0_15px_rgba(34,197,94,0.5)] transition-all transform hover:scale-105">
+                      <Play size={24} fill="currentColor" className="ml-1" />
+                    </button>
+                    <button className="p-3 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"><SkipForward size={20} /></button>
+                  </div>
+
+                  <div className="pt-4">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className="relative">
+                        <input type="checkbox" className="sr-only peer" defaultChecked />
+                        <div className="w-10 h-4 bg-slate-700 rounded-full peer peer-checked:bg-green-500/30 transition-colors"></div>
+                        <div className="absolute -top-1 left-0 w-6 h-6 bg-slate-400 rounded-full peer-checked:translate-x-4 peer-checked:bg-green-400 transition-transform shadow-[0_0_10px_rgba(0,0,0,0.5)]"></div>
+                      </div>
+                      <span className="font-mono text-xs text-slate-300 uppercase tracking-widest group-hover:text-green-400 transition-colors">Extracción de color en tiempo real</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </GlassCard>
+          </div>
+        );
+      
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <>
+      <CyberStyles />
+      <div className="scanlines"></div>
+      
+      <div className="min-h-screen text-slate-200 flex font-sans selection:bg-cyan-500/30 relative">
+        {bgElements}
+
+        {/* Sidebar HUD */}
+        <aside className="w-20 md:w-64 glass-panel border-r border-cyan-900/30 flex flex-col z-20 transition-all duration-300">
+          <div className="p-4 md:p-6 border-b border-cyan-900/30">
+            <h1 className="text-xl md:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 flex items-center justify-center md:justify-start gap-2 tracking-tight">
+              <Monitor size={28} className="text-cyan-400 drop-shadow-[0_0_8px_rgba(0,240,255,0.8)]" />
+              <span className="hidden md:inline">CHROMAFLOW</span>
+            </h1>
+            <p className="hidden md:block font-mono text-[10px] text-cyan-600 mt-1 uppercase tracking-[0.2em]">Engine v1.0.0_b</p>
+          </div>
+
+          <nav className="flex-1 px-2 md:px-4 py-6 space-y-3">
+            {[
+              { id: 'dashboard', icon: Activity, label: 'DASHBOARD' },
+              { id: 'profiles', icon: Layers, label: 'PROFILES' },
+              { id: 'spotify', icon: Music, label: 'AUDIO_SYNC' }
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center justify-center md:justify-start gap-3 px-3 py-3 rounded-md font-mono text-xs tracking-widest cyber-btn ${activeTab === item.id ? 'active' : ''}`}
+              >
+                <item.icon size={18} />
+                <span className="hidden md:inline">{item.label}</span>
+              </button>
+            ))}
+          </nav>
+
+          <div className="p-4 border-t border-cyan-900/30 bg-black/20">
+            <button 
+              onClick={() => setSystemPower(!systemPower)}
+              className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-md font-mono text-xs tracking-widest font-bold uppercase transition-all duration-300 power-btn ${systemPower ? 'on' : ''}`}
+            >
+              <Power size={18} />
+              <span className="hidden md:inline">{systemPower ? 'SYS_ONLINE' : 'SYS_OFFLINE'}</span>
+            </button>
+            
+            <div className="mt-4 flex flex-col md:flex-row items-center justify-between px-2 gap-2">
+               <button className="p-2 text-slate-500 hover:text-cyan-400 transition-colors"><Settings size={18} /></button>
+               <span className="hidden md:flex font-mono text-[9px] text-slate-500 items-center gap-1.5 uppercase">
+                 <span className={`w-1.5 h-1.5 rounded-full ${systemPower ? 'bg-cyan-400 shadow-[0_0_5px_#00F0FF] animate-pulse' : 'bg-red-500'}`}></span>
+                 {systemPower ? 'LINK_ACTIVE' : 'DISCONNECTED'}
+               </span>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main Content Area */}
+        <main className="flex-1 p-4 md:p-8 overflow-y-auto z-10 custom-scrollbar">
+          <div className="max-w-5xl mx-auto h-full pb-20">
+            {renderContent()}
+          </div>
+        </main>
+      </div>
+    </>
+  );
+}
