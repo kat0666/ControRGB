@@ -1,5 +1,6 @@
-import { startTransition, useEffect, useState } from "react";
+import { useMemo,  startTransition, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import throttle from "lodash.throttle";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -370,11 +371,16 @@ export default function App() {
     void broadcastColor(profile.hex, `Profile ${profile.name}`);
   };
 
+  const broadcastColorThrottled = useMemo(() => throttle((hex: string, source: string) => {
+    void broadcastColor(hex, source);
+  }, 100), [systemPower, connectedUsbPort, bleCharacteristic, bleDevice]);
+
   const handleColorInputChange = (hex: string) => {
+    setColor(hex);
     startTransition(() => {
       setActiveProfile("Custom Mix");
     });
-    void broadcastColor(hex, "Manual color");
+    broadcastColorThrottled(hex, "Manual color");
   };
 
   const statusBadges = [
