@@ -1,5 +1,4 @@
 import { startTransition, useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -11,11 +10,15 @@ import {
   RefreshCw,
   Settings,
   TerminalSquare,
+  Network,
+  Radio,
 } from "lucide-react";
 import "./App.css";
-
-const BLE_RGB_SERVICE_UUID = "0000ffe5-0000-1000-8000-00805f9b34fb";
-const BLE_RGB_CHARACTERISTIC_UUID = "0000ffe9-0000-1000-8000-00805f9b34fb";
+import { deviceManager } from "./core/DeviceManager";
+import { GenericUsbAdapter } from "./adapters/GenericUsbAdapter";
+import { GenericBleAdapter } from "./adapters/GenericBleAdapter";
+import { WledAdapter } from "./adapters/WledAdapter";
+import { OpenRgbAdapter } from "./adapters/OpenRgbAdapter";
 
 type TabId = "dashboard" | "profiles" | "control";
 type Accent = "cyan" | "violet" | "magenta" | "emerald" | "slate";
@@ -50,7 +53,12 @@ type MetricCardProps = {
   accent?: Accent;
 };
 
-const NAV_ITEMS: Array<{ id: TabId; label: string; kicker: string; icon: LucideIcon }> = [
+const NAV_ITEMS: Array<{
+  id: TabId;
+  label: string;
+  kicker: string;
+  icon: LucideIcon;
+}> = [
   { id: "dashboard", label: "Dashboard", kicker: "Signal", icon: Activity },
   { id: "profiles", label: "Profiles", kicker: "Mood", icon: Layers },
   { id: "control", label: "Control", kicker: "Live", icon: Settings },
@@ -97,15 +105,18 @@ const PROFILES: Profile[] = [
 const DELIVERY_TRACK: Array<{ label: string; detail: string }> = [
   {
     label: "Integrated now",
-    detail: "USB scan/connect, BLE connect, master color broadcast, visual shell.",
+    detail:
+      "USB scan/connect, BLE connect, master color broadcast, visual shell.",
   },
   {
     label: "Ready for Jules",
-    detail: "Refine layout density, richer telemetry, better state storytelling, disconnect flows.",
+    detail:
+      "Refine layout density, richer telemetry, better state storytelling, disconnect flows.",
   },
   {
     label: "Ready for Stitch",
-    detail: "Final polish, animation tuning, component cleanup, production hardening.",
+    detail:
+      "Final polish, animation tuning, component cleanup, production hardening.",
   },
 ];
 
@@ -125,7 +136,14 @@ function hexToRgb(hex: string): [number, number, number] {
   ];
 }
 
-function Panel({ title, eyebrow, accent, icon: Icon, className = "", children }: PanelProps) {
+function Panel({
+  title,
+  eyebrow,
+  accent,
+  icon: Icon,
+  className = "",
+  children,
+}: PanelProps) {
   return (
     <section className={`panel panel--${accent} ${className}`.trim()}>
       <header className="panel__header">
@@ -157,9 +175,7 @@ export default function App() {
   const [usbPorts, setUsbPorts] = useState<string[]>([]);
   const [selectedPort, setSelectedPort] = useState("");
   const [connectedUsbPort, setConnectedUsbPort] = useState<string | null>(null);
-  const [bleDevice, setBleDevice] = useState<BluetoothDevice | null>(null);
-  const [bleCharacteristic, setBleCharacteristic] =
-    useState<BluetoothRemoteGATTCharacteristic | null>(null);
+  const [bleDeviceName, setBleDeviceName] = useState<string | null>(null);
   const [color, setColor] = useState(PROFILES[0].hex);
   const [activeProfile, setActiveProfile] = useState(PROFILES[0].name);
   const [statusLine, setStatusLine] = useState(
@@ -170,20 +186,32 @@ export default function App() {
   const [isConnectingBle, setIsConnectingBle] = useState(false);
   const [activityLog, setActivityLog] = useState<EventEntry[]>([
     buildEvent("Chromaflow deck booted. Awaiting first hardware handshake."),
-    buildEvent("Visual shell integrated over the live RGB routing layer.", "success"),
+    buildEvent(
+      "Visual shell integrated over the live RGB routing layer.",
+      "success",
+    ),
   ]);
 
-  const connectedTargets = Number(Boolean(connectedUsbPort)) + Number(Boolean(bleCharacteristic));
+  const [connectedTargetsCount, setConnectedTargetsCount] = useState(0);
+
+  useEffect(() => {
+    return deviceManager.subscribe(() => {
+      setConnectedTargetsCount(deviceManager.getConnectedDevices().length);
+    });
+  }, []);
 
   const pushEvent = (message: string, tone: EventTone = "neutral") => {
-    setActivityLog((previous) => [buildEvent(message, tone), ...previous].slice(0, 8));
+    setActivityLog((previous) =>
+      [buildEvent(message, tone), ...previous].slice(0, 8),
+    );
   };
 
   const scanUsbPorts = async (reason = "USB scan refreshed.") => {
     setIsScanningUsb(true);
 
     try {
-      const ports = await invoke<string[]>("scan_usb_ports");
+      const adapters = await GenericUsbAdapter.discover();
+      const ports = adapters.map((a) => a.id.replace("usb-", ""));
       setUsbPorts(ports);
       setSelectedPort((current) => {
         if (current && ports.includes(current)) {
@@ -199,7 +227,10 @@ export default function App() {
           : "No USB ports detected yet. That can still be fine if you are going BLE-only.";
 
       setStatusLine(nextStatus);
-      pushEvent(`${reason} ${ports.length} port${ports.length === 1 ? "" : "s"} visible.`, "success");
+      pushEvent(
+        `${reason} ${ports.length} port${ports.length === 1 ? "" : "s"} visible.`,
+        "success",
+      );
     } catch (error) {
       const message = `USB scan failed: ${String(error)}`;
       setStatusLine(message);
@@ -213,20 +244,6 @@ export default function App() {
     void scanUsbPorts("Startup scan complete.");
   }, []);
 
-  const sendColorUsb = async (r: number, g: number, b: number) => {
-    await invoke("set_usb_color", { r, g, b });
-  };
-
-  const sendColorBle = async (r: number, g: number, b: number) => {
-    if (!bleCharacteristic) {
-      throw new Error("No BLE characteristic available.");
-    }
-
-    // Generic RGB BLE payload used by many low-cost controllers.
-    const payload = new Uint8Array([0x56, r, g, b, 0x00, 0xf0, 0xaa]);
-    await bleCharacteristic.writeValue(payload);
-  };
-
   const broadcastColor = async (hex: string, source: string) => {
     setColor(hex);
     const [r, g, b] = hexToRgb(hex);
@@ -234,54 +251,30 @@ export default function App() {
     if (!systemPower) {
       const message = `Preview updated to ${hex}, but system power is offline so nothing was transmitted.`;
       setStatusLine(message);
-      pushEvent(`${source} parked at ${hex} while the deck is offline.`, "warn");
+      pushEvent(
+        `${source} parked at ${hex} while the deck is offline.`,
+        "warn",
+      );
       return;
     }
 
-    const targets: Array<{ label: string; action: () => Promise<void> }> = [];
-
-    if (connectedUsbPort) {
-      targets.push({
-        label: `USB ${connectedUsbPort}`,
-        action: () => sendColorUsb(r, g, b),
-      });
-    }
-
-    if (bleCharacteristic && bleDevice) {
-      targets.push({
-        label: `BLE ${bleDevice.name ?? "Unnamed device"}`,
-        action: () => sendColorBle(r, g, b),
-      });
-    }
-
-    if (targets.length === 0) {
-      const message = `Color ${hex} staged locally. No active hardware targets yet.`;
-      setStatusLine(message);
-      pushEvent(`${source} staged ${hex} with no live targets attached.`, "warn");
-      return;
-    }
-
-    const results = await Promise.allSettled(targets.map((target) => target.action()));
-    const delivered = results.filter((result) => result.status === "fulfilled").length;
+    const { delivered, errors } = await deviceManager.broadcastColor(r, g, b);
 
     if (delivered > 0) {
-      const successTargets = targets
-        .filter((_, index) => results[index]?.status === "fulfilled")
-        .map((target) => target.label)
-        .join(", ");
-      const message = `${source} pushed ${hex} to ${successTargets}.`;
+      const message = `${source} pushed ${hex} to ${delivered} target(s).`;
       setStatusLine(message);
       pushEvent(message, "success");
+    } else if (errors.length === 0) {
+      const message = `Color ${hex} staged locally. No active hardware targets yet.`;
+      setStatusLine(message);
+      pushEvent(
+        `${source} staged ${hex} with no live targets attached.`,
+        "warn",
+      );
     }
 
-    const failureMessages = results
-      .map((result, index) =>
-        result.status === "rejected" ? `${targets[index]?.label ?? "Unknown target"}: ${String(result.reason)}` : null,
-      )
-      .filter((value): value is string => Boolean(value));
-
-    if (failureMessages.length > 0) {
-      const message = `Some targets rejected the color push. ${failureMessages.join(" | ")}`;
+    if (errors.length > 0) {
+      const message = `Some targets rejected the color push. ${errors.join(" | ")}`;
       setStatusLine(message);
       pushEvent(message, "error");
     }
@@ -289,7 +282,8 @@ export default function App() {
 
   const handleConnectUsb = async () => {
     if (!selectedPort) {
-      const message = "Pick a COM/TTY port first so I have something to talk to.";
+      const message =
+        "Pick a COM/TTY port first so I have something to talk to.";
       setStatusLine(message);
       pushEvent(message, "warn");
       return;
@@ -298,7 +292,10 @@ export default function App() {
     setIsConnectingUsb(true);
 
     try {
-      await invoke("connect_usb", { portName: selectedPort });
+      const adapter = new GenericUsbAdapter(selectedPort);
+      await adapter.connect();
+      deviceManager.registerDevice(adapter);
+
       setConnectedUsbPort(selectedPort);
       const message = `USB link established on ${selectedPort}.`;
       setStatusLine(message);
@@ -324,34 +321,12 @@ export default function App() {
     setIsConnectingBle(true);
 
     try {
-      const device = await navigator.bluetooth.requestDevice({
-        filters: [{ services: [BLE_RGB_SERVICE_UUID] }],
-        optionalServices: [BLE_RGB_SERVICE_UUID],
-      });
+      const adapter = new GenericBleAdapter();
+      await adapter.connect();
+      deviceManager.registerDevice(adapter);
 
-      const server = await device.gatt?.connect();
-      if (!server) {
-        throw new Error("GATT server not available.");
-      }
-
-      const service = await server.getPrimaryService(BLE_RGB_SERVICE_UUID);
-      const characteristic = await service.getCharacteristic(BLE_RGB_CHARACTERISTIC_UUID);
-
-      device.addEventListener(
-        "gattserverdisconnected",
-        () => {
-          setBleDevice(null);
-          setBleCharacteristic(null);
-          setStatusLine("BLE link dropped. Reconnect when the device is back in range.");
-          pushEvent("BLE device disconnected.", "warn");
-        },
-        { once: true },
-      );
-
-      setBleDevice(device);
-      setBleCharacteristic(characteristic);
-      const deviceName = device.name ?? "Unnamed BLE device";
-      const message = `BLE link established with ${deviceName}.`;
+      setBleDeviceName(adapter.name);
+      const message = `BLE link established with ${adapter.name}.`;
       setStatusLine(message);
       pushEvent(message, "success");
     } catch (error) {
@@ -360,6 +335,28 @@ export default function App() {
       pushEvent(message, "error");
     } finally {
       setIsConnectingBle(false);
+    }
+  };
+
+  const handleConnectWled = async (ip: string) => {
+    try {
+      const adapter = new WledAdapter(ip);
+      await adapter.connect();
+      deviceManager.registerDevice(adapter);
+      pushEvent(`WLED connected at ${ip}.`, "success");
+    } catch (error) {
+      pushEvent(`WLED failed: ${String(error)}`, "error");
+    }
+  };
+
+  const handleConnectOpenRgb = async () => {
+    try {
+      const adapter = new OpenRgbAdapter();
+      await adapter.connect();
+      deviceManager.registerDevice(adapter);
+      pushEvent("OpenRGB SDK connected.", "success");
+    } catch (error) {
+      pushEvent(`OpenRGB failed: ${String(error)}`, "error");
     }
   };
 
@@ -380,8 +377,8 @@ export default function App() {
   const statusBadges = [
     { label: "Power", value: systemPower ? "ONLINE" : "OFFLINE" },
     { label: "USB", value: connectedUsbPort ? "LINKED" : "IDLE" },
-    { label: "BLE", value: bleDevice ? "LINKED" : "IDLE" },
-    { label: "Targets", value: String(connectedTargets) },
+    { label: "BLE", value: bleDeviceName ? "LINKED" : "IDLE" },
+    { label: "Targets", value: String(connectedTargetsCount) },
   ];
 
   return (
@@ -439,7 +436,8 @@ export default function App() {
           </button>
 
           <p className="sidebar__note">
-            We are doing the strong bones here. Jules and Stitch can handle the eyeliner.
+            We are doing the strong bones here. Jules and Stitch can handle the
+            eyeliner.
           </p>
         </div>
       </aside>
@@ -447,8 +445,12 @@ export default function App() {
       <main className="main-stage">
         <header className="hero-band">
           <div className="hero-copy">
-            <p className="hero-copy__eyebrow">RGB command spine / Tauri + USB + BLE</p>
-            <h2 className="hero-copy__title">A proper control deck instead of a lonely color input.</h2>
+            <p className="hero-copy__eyebrow">
+              RGB command spine / Tauri + USB + BLE
+            </p>
+            <h2 className="hero-copy__title">
+              A proper control deck instead of a lonely color input.
+            </h2>
             <p className="hero-copy__body">{statusLine}</p>
           </div>
 
@@ -464,9 +466,18 @@ export default function App() {
 
         {activeTab === "dashboard" ? (
           <section className="dashboard-grid">
-            <Panel title="Live Routing" eyebrow="Current scene" accent="cyan" icon={Activity} className="span-7">
+            <Panel
+              title="Live Routing"
+              eyebrow="Current scene"
+              accent="cyan"
+              icon={Activity}
+              className="span-7"
+            >
               <div className="hero-core">
-                <div className="hero-core__swatch" style={{ background: color }} />
+                <div
+                  className="hero-core__swatch"
+                  style={{ background: color }}
+                />
                 <div className="hero-core__meta">
                   <p className="hero-core__label">Active profile</p>
                   <h3>{activeProfile}</h3>
@@ -475,8 +486,16 @@ export default function App() {
               </div>
 
               <div className="metric-row">
-                <MetricCard label="USB link" value={connectedUsbPort ?? "Not linked"} accent="violet" />
-                <MetricCard label="BLE link" value={bleDevice?.name ?? "Not linked"} accent="magenta" />
+                <MetricCard
+                  label="USB link"
+                  value={connectedUsbPort ?? "Not linked"}
+                  accent="violet"
+                />
+                <MetricCard
+                  label="BLE link"
+                  value={bleDeviceName ?? "Not linked"}
+                  accent="magenta"
+                />
                 <MetricCard
                   label="Broadcast mode"
                   value={systemPower ? "Live fire" : "Preview only"}
@@ -485,7 +504,13 @@ export default function App() {
               </div>
             </Panel>
 
-            <Panel title="USB Link" eyebrow="Wired control" accent="violet" icon={Monitor} className="span-5">
+            <Panel
+              title="USB Link"
+              eyebrow="Wired control"
+              accent="violet"
+              icon={Monitor}
+              className="span-5"
+            >
               <div className="stack">
                 <label className="field">
                   <span className="field__label">Detected COM / TTY ports</span>
@@ -510,7 +535,10 @@ export default function App() {
                     onClick={() => void scanUsbPorts("Manual scan complete.")}
                     disabled={isScanningUsb}
                   >
-                    <RefreshCw size={16} className={isScanningUsb ? "spin" : ""} />
+                    <RefreshCw
+                      size={16}
+                      className={isScanningUsb ? "spin" : ""}
+                    />
                     <span>{isScanningUsb ? "Scanning" : "Rescan"}</span>
                   </button>
 
@@ -527,11 +555,17 @@ export default function App() {
               </div>
             </Panel>
 
-            <Panel title="BLE Link" eyebrow="Wireless control" accent="magenta" icon={Cpu} className="span-5">
+            <Panel
+              title="BLE Link"
+              eyebrow="Wireless control"
+              accent="magenta"
+              icon={Cpu}
+              className="span-5"
+            >
               <div className="stack">
                 <div className="status-card">
                   <span className="status-card__label">Connected device</span>
-                  <strong>{bleDevice?.name ?? "No BLE device linked yet"}</strong>
+                  <strong>{bleDeviceName ?? "No BLE device linked yet"}</strong>
                 </div>
 
                 <button
@@ -546,15 +580,71 @@ export default function App() {
               </div>
             </Panel>
 
-            <Panel title="Master Chroma" eyebrow="Manual override" accent="emerald" icon={Settings} className="span-7">
+            <Panel
+              title="Network / Smart Devices"
+              eyebrow="Experimental Scaffold"
+              accent="cyan"
+              icon={Network}
+              className="span-12"
+            >
+              <div
+                className="stack"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "1rem",
+                }}
+              >
+                <div className="status-card">
+                  <span className="status-card__label">WLED Network Strip</span>
+                  <div className="button-row" style={{ marginTop: "0.5rem" }}>
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      onClick={() => void handleConnectWled("192.168.1.100")}
+                    >
+                      <Radio size={16} />
+                      <span>Mock WLED Link</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="status-card">
+                  <span className="status-card__label">OpenRGB SDK Matrix</span>
+                  <div className="button-row" style={{ marginTop: "0.5rem" }}>
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      onClick={() => void handleConnectOpenRgb()}
+                    >
+                      <Layers size={16} />
+                      <span>Mock OpenRGB Link</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Panel>
+
+            <Panel
+              title="Master Chroma"
+              eyebrow="Manual override"
+              accent="emerald"
+              icon={Settings}
+              className="span-7"
+            >
               <div className="color-console">
                 <label className="color-picker">
-                  <span className="color-picker__swatch" style={{ background: color }} />
+                  <span
+                    className="color-picker__swatch"
+                    style={{ background: color }}
+                  />
                   <input
                     className="color-picker__input"
                     type="color"
                     value={color}
-                    onChange={(event) => handleColorInputChange(event.target.value)}
+                    onChange={(event) =>
+                      handleColorInputChange(event.target.value)
+                    }
                     aria-label="Master color picker"
                   />
                 </label>
@@ -574,10 +664,19 @@ export default function App() {
               </div>
             </Panel>
 
-            <Panel title="Runtime Log" eyebrow="Watch the deck talk back" accent="slate" icon={TerminalSquare} className="span-6">
+            <Panel
+              title="Runtime Log"
+              eyebrow="Watch the deck talk back"
+              accent="slate"
+              icon={TerminalSquare}
+              className="span-6"
+            >
               <div className="terminal">
                 {activityLog.map((entry) => (
-                  <div key={entry.id} className={`terminal__line terminal__line--${entry.tone}`}>
+                  <div
+                    key={entry.id}
+                    className={`terminal__line terminal__line--${entry.tone}`}
+                  >
                     <span className="terminal__prompt">{">"}</span>
                     <span>{entry.message}</span>
                   </div>
@@ -585,7 +684,13 @@ export default function App() {
               </div>
             </Panel>
 
-            <Panel title="Handoff Map" eyebrow="Deliberate rough edges" accent="cyan" icon={Layers} className="span-6">
+            <Panel
+              title="Handoff Map"
+              eyebrow="Deliberate rough edges"
+              accent="cyan"
+              icon={Layers}
+              className="span-6"
+            >
               <div className="handoff-list">
                 {DELIVERY_TRACK.map((item) => (
                   <article key={item.label} className="handoff-list__item">
@@ -610,12 +715,17 @@ export default function App() {
                   className={`profile-card ${isActive ? "is-active" : ""}`}
                   onClick={() => handleProfileSelect(profile)}
                 >
-                  <span className="profile-card__ribbon" style={{ background: profile.ribbon }} />
+                  <span
+                    className="profile-card__ribbon"
+                    style={{ background: profile.ribbon }}
+                  />
                   <div className="profile-card__body">
                     <div>
                       <p className="profile-card__eyebrow">Preset profile</p>
                       <h3>{profile.name}</h3>
-                      <p className="profile-card__desc">{profile.description}</p>
+                      <p className="profile-card__desc">
+                        {profile.description}
+                      </p>
                     </div>
                     <div className="profile-card__footer">
                       <span>{profile.hex.toUpperCase()}</span>
@@ -630,15 +740,25 @@ export default function App() {
 
         {activeTab === "control" ? (
           <section className="control-grid">
-            <Panel title="Connection State" eyebrow="Active targets" accent="cyan" icon={Activity} className="span-6">
+            <Panel
+              title="Connection State"
+              eyebrow="Active targets"
+              accent="cyan"
+              icon={Activity}
+              className="span-6"
+            >
               <div className="stack">
                 <div className="status-card">
                   <span className="status-card__label">USB transport</span>
-                  <strong>{connectedUsbPort ?? "Waiting for wired link"}</strong>
+                  <strong>
+                    {connectedUsbPort ?? "Waiting for wired link"}
+                  </strong>
                 </div>
                 <div className="status-card">
                   <span className="status-card__label">BLE transport</span>
-                  <strong>{bleDevice?.name ?? "Waiting for wireless link"}</strong>
+                  <strong>
+                    {bleDeviceName ?? "Waiting for wireless link"}
+                  </strong>
                 </div>
                 <div className="status-card">
                   <span className="status-card__label">Current profile</span>
@@ -647,7 +767,13 @@ export default function App() {
               </div>
             </Panel>
 
-            <Panel title="Quick Fire" eyebrow="One-click scene pushes" accent="magenta" icon={Settings} className="span-6">
+            <Panel
+              title="Quick Fire"
+              eyebrow="One-click scene pushes"
+              accent="magenta"
+              icon={Settings}
+              className="span-6"
+            >
               <div className="quick-palette">
                 {PROFILES.slice(0, 4).map((profile) => (
                   <button
@@ -663,15 +789,23 @@ export default function App() {
               </div>
             </Panel>
 
-            <Panel title="Operational Notes" eyebrow="What is intentionally rough" accent="slate" icon={TerminalSquare} className="span-12">
+            <Panel
+              title="Operational Notes"
+              eyebrow="What is intentionally rough"
+              accent="slate"
+              icon={TerminalSquare}
+              className="span-12"
+            >
               <div className="notes">
                 <p>
-                  The shell is wired to real USB and BLE color pushes right now. Disconnect flows, richer telemetry,
-                  and deeper hardware introspection are intentionally left light so the next pass can focus on product
-                  quality instead of plumbing.
+                  The shell is wired to real USB and BLE color pushes right now.
+                  Disconnect flows, richer telemetry, and deeper hardware
+                  introspection are intentionally left light so the next pass
+                  can focus on product quality instead of plumbing.
                 </p>
                 <p>
-                  In other words: we handled the grunt work, and the future team gets to wear nicer gloves.
+                  In other words: we handled the grunt work, and the future team
+                  gets to wear nicer gloves.
                 </p>
               </div>
             </Panel>
