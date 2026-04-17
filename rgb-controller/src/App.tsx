@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
@@ -175,119 +175,141 @@ export default function App() {
 
   const connectedTargets = Number(Boolean(connectedUsbPort)) + Number(Boolean(bleCharacteristic));
 
-  const pushEvent = (message: string, tone: EventTone = "neutral") => {
+  const pushEvent = useCallback((message: string, tone: EventTone = "neutral") => {
     setActivityLog((previous) => [buildEvent(message, tone), ...previous].slice(0, 8));
-  };
+  }, []);
 
-  const scanUsbPorts = async (reason = "USB scan refreshed.") => {
-    setIsScanningUsb(true);
+  const scanUsbPorts = useCallback(
+    async (reason = "USB scan refreshed.") => {
+      setIsScanningUsb(true);
 
-    try {
-      const ports = await invoke<string[]>("scan_usb_ports");
-      setUsbPorts(ports);
-      setSelectedPort((current) => {
-        if (current && ports.includes(current)) {
-          return current;
-        }
+      try {
+        const ports = await invoke<string[]>("scan_usb_ports");
+        setUsbPorts(ports);
+        setSelectedPort((current) => {
+          if (current && ports.includes(current)) {
+            return current;
+          }
 
-        return ports[0] ?? "";
-      });
+          return ports[0] ?? "";
+        });
 
-      const nextStatus =
-        ports.length > 0
-          ? `Found ${ports.length} USB port${ports.length === 1 ? "" : "s"} ready for selection.`
-          : "No USB ports detected yet. That can still be fine if you are going BLE-only.";
+        const nextStatus =
+          ports.length > 0
+            ? `Found ${ports.length} USB port${ports.length === 1 ? "" : "s"} ready for selection.`
+            : "No USB ports detected yet. That can still be fine if you are going BLE-only.";
 
-      setStatusLine(nextStatus);
-      pushEvent(`${reason} ${ports.length} port${ports.length === 1 ? "" : "s"} visible.`, "success");
-    } catch (error) {
-      const message = `USB scan failed: ${String(error)}`;
-      setStatusLine(message);
-      pushEvent(message, "error");
-    } finally {
-      setIsScanningUsb(false);
-    }
-  };
+        setStatusLine(nextStatus);
+        pushEvent(`${reason} ${ports.length} port${ports.length === 1 ? "" : "s"} visible.`, "success");
+      } catch (error) {
+        const message = `USB scan failed: ${String(error)}`;
+        setStatusLine(message);
+        pushEvent(message, "error");
+      } finally {
+        setIsScanningUsb(false);
+      }
+    },
+    [pushEvent],
+  );
 
   useEffect(() => {
     void scanUsbPorts("Startup scan complete.");
+  }, [scanUsbPorts]);
+
+  const sendColorUsb = useCallback(async (r: number, g: number, b: number) => {
+    await invoke("set_usb_color", { r, g, b });
   }, []);
 
-  const sendColorUsb = async (r: number, g: number, b: number) => {
-    await invoke("set_usb_color", { r, g, b });
-  };
+  const sendColorBle = useCallback(
+    async (r: number, g: number, b: number) => {
+      if (!bleCharacteristic) {
+        throw new Error("No BLE characteristic available.");
+      }
 
-  const sendColorBle = async (r: number, g: number, b: number) => {
-    if (!bleCharacteristic) {
-      throw new Error("No BLE characteristic available.");
-    }
+      // Generic RGB BLE payload used by many low-cost controllers.
+      const payload = new Uint8Array([0x56, r, g, b, 0x00, 0xf0, 0xaa]);
+      await bleCharacteristic.writeValue(payload);
+    },
+    [bleCharacteristic],
+  );
 
-    // Generic RGB BLE payload used by many low-cost controllers.
-    const payload = new Uint8Array([0x56, r, g, b, 0x00, 0xf0, 0xaa]);
-    await bleCharacteristic.writeValue(payload);
-  };
+  const broadcastColor = useCallback(
+    async (hex: string, source: string) => {
+      setColor(hex);
+      const [r, g, b] = hexToRgb(hex);
 
-  const broadcastColor = async (hex: string, source: string) => {
-    setColor(hex);
-    const [r, g, b] = hexToRgb(hex);
+      if (!systemPower) {
+        const message = `Preview updated to ${hex}, but system power is offline so nothing was transmitted.`;
+        setStatusLine(message);
+        pushEvent(`${source} parked at ${hex} while the deck is offline.`, "warn");
+        return;
+      }
 
-    if (!systemPower) {
-      const message = `Preview updated to ${hex}, but system power is offline so nothing was transmitted.`;
-      setStatusLine(message);
-      pushEvent(`${source} parked at ${hex} while the deck is offline.`, "warn");
-      return;
-    }
+      const targets: Array<{ label: string; action: () => Promise<void> }> = [];
 
-    const targets: Array<{ label: string; action: () => Promise<void> }> = [];
+      if (connectedUsbPort) {
+        targets.push({
+          label: `USB ${connectedUsbPort}`,
+          action: () => sendColorUsb(r, g, b),
+        });
+      }
 
-    if (connectedUsbPort) {
-      targets.push({
-        label: `USB ${connectedUsbPort}`,
-        action: () => sendColorUsb(r, g, b),
-      });
-    }
+      if (bleCharacteristic && bleDevice) {
+        targets.push({
+          label: `BLE ${bleDevice.name ?? "Unnamed device"}`,
+          action: () => sendColorBle(r, g, b),
+        });
+      }
 
-    if (bleCharacteristic && bleDevice) {
-      targets.push({
-        label: `BLE ${bleDevice.name ?? "Unnamed device"}`,
-        action: () => sendColorBle(r, g, b),
-      });
-    }
+      if (targets.length === 0) {
+        const message = `Color ${hex} staged locally. No active hardware targets yet.`;
+        setStatusLine(message);
+        pushEvent(`${source} staged ${hex} with no live targets attached.`, "warn");
+        return;
+      }
 
-    if (targets.length === 0) {
-      const message = `Color ${hex} staged locally. No active hardware targets yet.`;
-      setStatusLine(message);
-      pushEvent(`${source} staged ${hex} with no live targets attached.`, "warn");
-      return;
-    }
+      const results = await Promise.allSettled(targets.map((target) => target.action()));
+      let delivered = 0;
+      const successTargetLabels: string[] = [];
+      const failureMessages: string[] = [];
 
-    const results = await Promise.allSettled(targets.map((target) => target.action()));
-    const delivered = results.filter((result) => result.status === "fulfilled").length;
+      for (let index = 0; index < results.length; index++) {
+        const result = results[index];
+        const target = targets[index];
 
-    if (delivered > 0) {
-      const successTargets = targets
-        .filter((_, index) => results[index]?.status === "fulfilled")
-        .map((target) => target.label)
-        .join(", ");
-      const message = `${source} pushed ${hex} to ${successTargets}.`;
-      setStatusLine(message);
-      pushEvent(message, "success");
-    }
+        if (result.status === "fulfilled") {
+          delivered++;
+          if (target) successTargetLabels.push(target.label);
+        } else {
+          failureMessages.push(`${target?.label ?? "Unknown target"}: ${String(result.reason)}`);
+        }
+      }
 
-    const failureMessages = results
-      .map((result, index) =>
-        result.status === "rejected" ? `${targets[index]?.label ?? "Unknown target"}: ${String(result.reason)}` : null,
-      )
-      .filter((value): value is string => Boolean(value));
+      if (delivered > 0) {
+        const successTargets = successTargetLabels.join(", ");
+        const message = `${source} pushed ${hex} to ${successTargets}.`;
+        setStatusLine(message);
+        pushEvent(message, "success");
+      }
 
-    if (failureMessages.length > 0) {
-      const message = `Some targets rejected the color push. ${failureMessages.join(" | ")}`;
-      setStatusLine(message);
-      pushEvent(message, "error");
-    }
-  };
+      if (failureMessages.length > 0) {
+        const message = `Some targets rejected the color push. ${failureMessages.join(" | ")}`;
+        setStatusLine(message);
+        pushEvent(message, "error");
+      }
+    },
+    [
+      systemPower,
+      connectedUsbPort,
+      bleCharacteristic,
+      bleDevice,
+      sendColorUsb,
+      sendColorBle,
+      pushEvent,
+    ],
+  );
 
-  const handleConnectUsb = async () => {
+  const handleConnectUsb = useCallback(async () => {
     if (!selectedPort) {
       const message = "Pick a COM/TTY port first so I have something to talk to.";
       setStatusLine(message);
@@ -310,9 +332,9 @@ export default function App() {
     } finally {
       setIsConnectingUsb(false);
     }
-  };
+  }, [selectedPort, pushEvent]);
 
-  const handleConnectBluetooth = async () => {
+  const handleConnectBluetooth = useCallback(async () => {
     if (!("bluetooth" in navigator)) {
       const message =
         "This runtime does not expose Web Bluetooth, so BLE pairing is unavailable from here.";
@@ -361,28 +383,37 @@ export default function App() {
     } finally {
       setIsConnectingBle(false);
     }
-  };
+  }, [pushEvent]);
 
-  const handleProfileSelect = (profile: Profile) => {
-    startTransition(() => {
-      setActiveProfile(profile.name);
-    });
-    void broadcastColor(profile.hex, `Profile ${profile.name}`);
-  };
+  const handleProfileSelect = useCallback(
+    (profile: Profile) => {
+      startTransition(() => {
+        setActiveProfile(profile.name);
+      });
+      void broadcastColor(profile.hex, `Profile ${profile.name}`);
+    },
+    [broadcastColor],
+  );
 
-  const handleColorInputChange = (hex: string) => {
-    startTransition(() => {
-      setActiveProfile("Custom Mix");
-    });
-    void broadcastColor(hex, "Manual color");
-  };
+  const handleColorInputChange = useCallback(
+    (hex: string) => {
+      startTransition(() => {
+        setActiveProfile("Custom Mix");
+      });
+      void broadcastColor(hex, "Manual color");
+    },
+    [broadcastColor],
+  );
 
-  const statusBadges = [
-    { label: "Power", value: systemPower ? "ONLINE" : "OFFLINE" },
-    { label: "USB", value: connectedUsbPort ? "LINKED" : "IDLE" },
-    { label: "BLE", value: bleDevice ? "LINKED" : "IDLE" },
-    { label: "Targets", value: String(connectedTargets) },
-  ];
+  const statusBadges = useMemo(
+    () => [
+      { label: "Power", value: systemPower ? "ONLINE" : "OFFLINE" },
+      { label: "USB", value: connectedUsbPort ? "LINKED" : "IDLE" },
+      { label: "BLE", value: bleDevice ? "LINKED" : "IDLE" },
+      { label: "Targets", value: String(connectedTargets) },
+    ],
+    [systemPower, connectedUsbPort, bleDevice, connectedTargets],
+  );
 
   return (
     <div className="control-room">
