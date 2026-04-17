@@ -1,0 +1,54 @@
+name: Repo Guardian (Tauri CI)
+
+on:
+  pull_request:
+    branches: ["main", "develop"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-checks:
+    name: Frontend (React/TS) Sanitization
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rgb-controller
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: rgb-controller/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck (No Emit)
+        run: npx tsc --noEmit
+      - name: Linting
+        run: npx eslint src --ext .ts,.tsx --max-warnings=0
+
+  rust-checks:
+    name: Backend (Rust) Sanitization
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rgb-controller
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install Tauri Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Check Formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Rust Linting (Clippy)
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
