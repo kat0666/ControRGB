@@ -1,0 +1,3 @@
+🎯 **What:** The `scan_usb_ports` Tauri command lacked test coverage because it directly relied on the `serialport` crate which reaches out to hardware, making it difficult to test. We extracted the core logic into `scan_usb_ports_impl` allowing dependency injection via a closure.
+📊 **Coverage:** We added unit tests to verify the behavior of `scan_usb_ports_impl` across different scenarios: returning successfully with a list of ports, returning an empty list, and handling errors from the hardware scanner.
+✨ **Result:** Increased testing confidence (from 0 to 100% on the core functionality of this specific command) and a safer refactoring pathway for the future.
